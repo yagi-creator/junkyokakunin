@@ -397,7 +397,7 @@
       `;
 
     const footnote = (isJhs && chu3English)
-      ? `<p style="font-size:0.68rem;color:#e74c3c;margin-top:4px;">※英語：青=中1・2、赤=中3（旧採択）　中3と中1，2の採択が違う場合のみこのような形で表示</p>`
+      ? `<p style="font-size:0.68rem;color:#e74c3c;margin-top:4px;">※英語：青=中1・2、赤=中3（旧採択）</p>`
       : '';
 
     return `
