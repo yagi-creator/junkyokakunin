@@ -1,9 +1,18 @@
 (() => {
+  function getStatusEl() {
+    return document.getElementById('status');
+  }
+
+  function getResultEl() {
+    return document.getElementById('result');
+  }
+
   function setStatus(message, isError = false) {
-    const el = document.getElementById('status');
+    const el = getStatusEl();
     console.log('[STATUS]', message);
 
     if (!el) return;
+
     el.textContent = message;
     el.className = isError ? 'status error' : 'status';
   }
@@ -46,7 +55,7 @@
   }
 
   function render(records) {
-    const result = document.getElementById('result');
+    const result = getResultEl();
     if (!result) return;
 
     if (!records.length) {
@@ -54,58 +63,59 @@
       return;
     }
 
-    // 最初は重くしないため20件だけ表示
     const preview = records.slice(0, 20);
 
-    result.innerHTML = preview.map(item => `
-      <section class="card">
-        <h2>${escapeHtml(item.prefecture)} ${escapeHtml(item.municipality)}</h2>
-        <div class="meta">ID: ${escapeHtml(item.id)} / 校種: ${escapeHtml(item.schoolType)}</div>
-        <div>小学校教科数: ${Object.keys(item.elementary || {}).length}</div>
-        <div>中学校教科数: ${Object.keys(item.junior || {}).length}</div>
-      </section>
-    `).join('');
+    result.innerHTML = `
+      <pre>先頭 ${preview.length} 件を表示中 / 全 ${records.length} 件</pre>
+      ${preview.map(item => `
+        <section class="card">
+          <h2>${escapeHtml(item.prefecture)} ${escapeHtml(item.municipality)}</h2>
+          <div class="meta">ID: ${escapeHtml(item.id)} / 校種: ${escapeHtml(item.schoolType)}</div>
+          <div>小学校: ${Object.keys(item.elementary || {}).length} 教科</div>
+          <div>中学校: ${Object.keys(item.junior || {}).length} 教科</div>
+        </section>
+      `).join('')}
+    `;
   }
 
   async function start() {
     try {
-      setStatus('1/5 app.js を起動しました');
+      setStatus('1/4 app.js 起動');
 
-      const url = './data/db.json?ts=' + Date.now();
-      setStatus('2/5 db.json を取得しています');
-
-      const response = await fetch(url, { cache: 'no-store' });
+      const response = await fetch('./data/db.json?ts=' + Date.now(), {
+        cache: 'no-store'
+      });
 
       if (!response.ok) {
         throw new Error(`db.json の読み込みに失敗しました (${response.status})`);
       }
 
-      setStatus('3/5 db.json を受信しました');
+      setStatus('2/4 db.json 取得成功');
 
-      const text = await response.text();
-      setStatus(`4/5 受信完了（${text.length}文字）JSON解析中...`);
-
-      const rawDB = JSON.parse(text);
+      const rawDB = await response.json();
       window.DB = rawDB;
+
+      setStatus('3/4 JSON解析成功');
 
       const records = normalizeDB(rawDB);
       window.DB_RECORDS = records;
 
       render(records);
 
-      setStatus(`5/5 読み込み完了（${records.length}件）`);
-      console.log('rawDB:', rawDB);
-      console.log('records:', records);
+      setStatus(`4/4 表示完了（${records.length}件）`);
+
+      console.log('DB loaded:', rawDB);
+      console.log('Normalized records:', records);
     } catch (error) {
       console.error(error);
       setStatus(`エラー: ${error.message}`, true);
 
-      const result = document.getElementById('result');
+      const result = getResultEl();
       if (result) {
         result.innerHTML = `
           <div class="empty">
-            読み込み中にエラーが発生しました。<br>
-            詳細はブラウザのコンソールを確認してください。
+            読み込みまたは表示でエラーが発生しました。<br>
+            コンソールを確認してください。
           </div>
         `;
       }
