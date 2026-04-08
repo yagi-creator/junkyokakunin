@@ -1,276 +1,276 @@
 (() => {
-  const ELEM_SUBJECTS = ['英語', '算数', '国語', '理科', '社会'];
-  const JHS_SUBJECTS  = ['英語', '数学', '国語', '理科', '地理', '歴史', '公民'];
+  const state = {
+    rawDB: [],
+    records: [],
+    filtered: [],
+  };
 
-  let DB = [];
-  let currentFilter = 'all';
-  let currentPref = '';
-  let currentQuery = '';
-  let timer = null;
+  const ELEM_ORDER = ['国語', '社会', '算数', '理科', '英語'];
+  const JHS_ORDER  = ['国語', '地理', '歴史', '公民', '数学', '理科', '英語'];
+
+  function $(...ids) {
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el) return el;
+    }
+    return null;
+  }
 
   function escapeHtml(value) {
-    return String(value ?? '').replace(/[&<>"']/g, ch => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;'
-    })[ch]);
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
-  function normalizedChu3(jhs) {
-    const current = String((jhs && jhs['英語']) || '').trim();
-    const rawChu3 = String((jhs && jhs['英語_中3']) || '').trim();
-    if (!rawChu3) return '';
-    return rawChu3 === current ? '' : rawChu3;
+  function setStatus(message, isError = false) {
+    const el = $('status', 'resultInfo');
+    if (!el) return;
+    el.textContent = message;
+    el.classList.toggle('error', !!isError);
   }
 
-  function normalizeDbData(raw) {
+  function cleanText(value) {
+    if (value == null) return '';
+    const s = String(value).trim();
+    return s === 'null' || s === 'undefined' ? '' : s;
+  }
+
+  function normalizeLocationText(value) {
+    let s = cleanText(value);
+    if (!s) return '';
+    s = s.replace(/[【】]/g, '');
+    s = s.replace(/\s+/g, ' ');
+    s = s.replace(/　+/g, ' ');
+    return s.trim();
+  }
+
+  function deriveMunicipality(item) {
+    const explicit = cleanText(item.municipality || item.市町村名 || item.自治体名);
+    if (explicit) return explicit;
+
+    const rawLocation = cleanText(item.location || item.住所始まり || item.採択地区名 || item.採択地区);
+    if (!rawLocation) return '';
+
+    const normalized = normalizeLocationText(rawLocation);
+    if (!normalized) return '';
+
+    return normalized;
+  }
+
+  function normalizeRecord(item, index) {
+    if (!item || typeof item !== 'object') return null;
+
+    const location = cleanText(item.location || item.住所始まり || item.採択地区名 || item.採択地区);
+    const municipality = deriveMunicipality(item);
+
+    return {
+      id: item.id || `row_${index + 1}`,
+      prefectureCode: item.prefectureCode ?? item.都道府県コード ?? null,
+      prefecture: cleanText(item.prefecture || item.都道府県),
+      adoptionAreaCode: item.adoptionAreaCode ?? item.採択地区コード ?? item.採択地区 ?? null,
+      municipality,
+      location,
+      schoolName: cleanText(item.schoolName || item.学校名),
+      schoolType: cleanText(item.schoolType || item.種別),
+      displayOrder: item.displayOrder ?? item.表示順 ?? null,
+      elementary: item.elementary || item.小学校 || {},
+      junior: item.junior || item.中学校 || {},
+    };
+  }
+
+  function normalizeDB(raw) {
     if (Array.isArray(raw)) {
-      return raw.map((item, index) => {
-        const name =
-          item['市町村名'] ||
-          item['市区町村名'] ||
-          item['municipality'] ||
-          item['name'] ||
-          `row_${index + 1}`;
-
-        return [
-          name,
-          {
-            '都道府県': item['都道府県'] || item['prefecture'] || '',
-            '種別': item['種別'] || item['schoolType'] || item['kind'] || '公立',
-            '所在地': item['所在地'] || item['location'] || '',
-            '小学校': item['小学校'] || item['elementary'] || null,
-            '中学校': item['中学校'] || item['junior'] || null
-          }
-        ];
-      });
+      return raw.map(normalizeRecord).filter(Boolean);
     }
 
     if (raw && typeof raw === 'object') {
-      return Object.entries(raw);
+      return Object.entries(raw)
+        .map(([key, value], index) => {
+          const rec = normalizeRecord(value, index);
+          if (!rec) return null;
+          if (!rec.municipality) rec.municipality = cleanText(key);
+          if (!rec.location) rec.location = cleanText(key);
+          return rec;
+        })
+        .filter(Boolean);
     }
 
-    return [];
+    throw new Error('db.json は配列またはオブジェクトである必要があります');
   }
 
-  function renderCard(name, v) {
-    const kind = v['種別'] || '';
-    const pref = v['都道府県'] || '';
-    const loc  = v['所在地'] || '';
-    const elem = v['小学校'] || null;
-    const jhs  = v['中学校'] || null;
-    const chu3 = normalizedChu3(jhs);
-
-    const tagHtml = kind === '公立'
-      ? '<span class="tag tag-public">公立</span>'
-      : '<span class="tag tag-private">国私立</span>';
-
-    let bodyHtml = '';
-
-    if (elem) {
-      const subs = ELEM_SUBJECTS.map(s => `
-        <div class="subject">
-          <span class="subject-name">${escapeHtml(s)}</span>
-          <span class="subject-pub">${escapeHtml(elem[s] || '-')}</span>
-        </div>
-      `).join('');
-
-      bodyHtml += `
-        <div class="school-section">
-          <span class="section-label elem">🏫 小学校</span>
-          <div class="subjects">${subs}</div>
-        </div>
-      `;
-    }
-
-    if (jhs) {
-      const subs = JHS_SUBJECTS.map(s => {
-        const pub = jhs[s] || '-';
-
-        if (s === '英語' && chu3) {
-          return `
-            <div class="subject">
-              <span class="subject-name">${escapeHtml(s)}</span>
-              <span class="subject-pub has-chu3">${escapeHtml(pub)}</span>
-              <span class="chu3-note">中3:${escapeHtml(chu3)}</span>
-            </div>
-          `;
-        }
-
-        return `
-          <div class="subject">
-            <span class="subject-name">${escapeHtml(s)}</span>
-            <span class="subject-pub">${escapeHtml(pub)}</span>
-          </div>
-        `;
-      }).join('');
-
-      bodyHtml += `
-        <div class="school-section">
-          <span class="section-label jhs">📖 中学校</span>
-          <div class="subjects jhs">${subs}</div>
-          ${chu3 ? '<p style="font-size:0.68rem;color:#e74c3c;margin-top:4px;">※英語：青=中1・2、赤=中3（旧採択）</p>' : ''}
-        </div>
-      `;
-    }
-
-    if (loc) {
-      bodyHtml += `<p class="location-note">📍 ${escapeHtml(loc)}</p>`;
-    }
-
-    return `
-      <div class="card">
-        <div class="card-header">
-          <span class="card-title">${escapeHtml(name)}</span>
-          ${tagHtml}
-          <span class="pref-tag">${escapeHtml(pref)}</span>
-        </div>
-        <div class="card-body">${bodyHtml}</div>
-      </div>
-    `;
+  function getDisplayTitle(rec) {
+    if (rec.schoolName) return rec.schoolName;
+    if (rec.municipality) return rec.municipality;
+    if (rec.location) return rec.location;
+    return '名称未設定';
   }
 
-  function buildSearchText(name, v) {
-    const parts = [
-      name,
-      v['都道府県'] || '',
-      v['所在地'] || '',
-      v['種別'] || ''
-    ];
-
-    const elem = v['小学校'] || {};
-    const jhs = v['中学校'] || {};
-
-    Object.values(elem).forEach(value => parts.push(String(value || '')));
-    Object.values(jhs).forEach(value => parts.push(String(value || '')));
-
-    return parts.join(' ').toLowerCase();
+  function getMunicipalityLabel(rec) {
+    return rec.municipality || normalizeLocationText(rec.location) || '名称未設定';
   }
 
-  function stateHasCondition() {
-    return currentQuery.trim().length >= 1 || currentPref || currentFilter !== 'all';
+  function getLocationLabel(rec) {
+    return normalizeLocationText(rec.location) || rec.municipality || '';
   }
 
-  function doSearch() {
-    const query = currentQuery.trim().toLowerCase();
-    const pref = currentPref;
-    const filter = currentFilter;
+  function subjectText(subjects, order, isJunior = false) {
+    const lines = [];
 
-    let entries = [...DB];
+    for (const key of order) {
+      const value = subjects?.[key];
+      if (!value) continue;
 
-    if (pref) {
-      entries = entries.filter(([, v]) => (v['都道府県'] || '') === pref);
+      if (isJunior && key === '英語' && subjects['英語_中3'] && subjects['英語_中3'] !== value) {
+        lines.push(`<li><span class="label">${escapeHtml(key)}</span><span class="value">${escapeHtml(value)} <span class="note">（中3: ${escapeHtml(subjects['英語_中3'])}）</span></span></li>`);
+      } else {
+        lines.push(`<li><span class="label">${escapeHtml(key)}</span><span class="value">${escapeHtml(value)}</span></li>`);
+      }
     }
 
-    if (filter !== 'all') {
-      entries = entries.filter(([, v]) => (v['種別'] || '') === filter);
+    return lines.length
+      ? `<ul class="subject-list">${lines.join('')}</ul>`
+      : '<p class="empty">データなし</p>';
+  }
+
+  function cardMeta(rec) {
+    const chips = [];
+    if (rec.prefecture) chips.push(`<span class="chip">${escapeHtml(rec.prefecture)}</span>`);
+    if (rec.schoolName && getMunicipalityLabel(rec)) {
+      chips.push(`<span class="chip">${escapeHtml(getMunicipalityLabel(rec))}</span>`);
     }
+    if (rec.schoolType) chips.push(`<span class="chip">${escapeHtml(rec.schoolType)}</span>`);
+    if (rec.schoolName) chips.push('<span class="chip">学校別</span>');
+    return chips.join('');
+  }
 
-    if (query) {
-      entries = entries.filter(([name, v]) => buildSearchText(name, v).includes(query));
-    }
+  function render(records) {
+    const el = $('results', 'result');
+    if (!el) return;
 
-    const info = document.getElementById('resultInfo');
-    const container = document.getElementById('results');
-
-    info.textContent = `${entries.length}件 表示中（全${DB.length}件）`;
-
-    if (entries.length === 0) {
-      const label = currentQuery || currentPref || currentFilter;
-      container.innerHTML =
-        `<div class="no-results"><span>🔍</span>「${escapeHtml(label)}」の結果が見つかりませんでした</div>`;
+    if (!records.length) {
+      el.innerHTML = '<div class="empty">該当するデータがありません。</div>';
+      updateCount(0);
       return;
     }
 
-    const show = entries.slice(0, 300);
-    container.innerHTML = show.map(([name, v]) => renderCard(name, v)).join('');
+    el.innerHTML = records.map((rec) => {
+      const title = getDisplayTitle(rec);
+      const municipalityLabel = getMunicipalityLabel(rec);
+      const locationLabel = getLocationLabel(rec);
+      const showSchoolLocation = !!rec.schoolName && !!locationLabel;
 
-    if (entries.length > 300) {
-      container.innerHTML +=
-        '<div class="no-results">結果が多いため上位300件を表示しています。検索を絞り込んでください。</div>';
+      return `
+        <article class="card">
+          <div class="card-head">
+            <h2 class="card-title">${escapeHtml(title)}</h2>
+            <div class="meta">${cardMeta(rec)}</div>
+          </div>
+          ${showSchoolLocation ? `<div class="submeta">所在地: ${escapeHtml(locationLabel)}</div>` : ''}
+          ${!rec.schoolName && municipalityLabel ? `<div class="submeta">地区名: ${escapeHtml(municipalityLabel)}</div>` : ''}
+          <div class="columns">
+            <section class="subject-box">
+              <h3>小学校</h3>
+              ${subjectText(rec.elementary, ELEM_ORDER, false)}
+            </section>
+            <section class="subject-box">
+              <h3>中学校</h3>
+              ${subjectText(rec.junior, JHS_ORDER, true)}
+            </section>
+          </div>
+        </article>
+      `;
+    }).join('');
+
+    updateCount(records.length);
+  }
+
+  function updateCount(count) {
+    const el = $('count');
+    if (el) el.textContent = `${count.toLocaleString('ja-JP')}件表示`;
+
+    const meta = $('headerMeta');
+    if (meta) {
+      meta.textContent = `全国 ${state.records.length.toLocaleString('ja-JP')}件のデータを収録 / 現在 ${count.toLocaleString('ja-JP')}件表示`;
     }
   }
 
-  function initDisplay() {
-    const info = document.getElementById('resultInfo');
-    const container = document.getElementById('results');
+  function buildSearchText(rec) {
+    return [
+      rec.prefecture,
+      rec.municipality,
+      rec.location,
+      rec.schoolName,
+      rec.schoolType,
+      ...Object.entries(rec.elementary || {}).flat(),
+      ...Object.entries(rec.junior || {}).flat(),
+    ].join(' ');
+  }
 
-    info.textContent = `都道府県を選択するか、市区町村名・学校名を入力してください（全${DB.length}件収録）`;
-    container.innerHTML = '';
+  function applyFilters() {
+    const keyword = ($('keyword', 'searchInput')?.value || '').trim().toLowerCase();
+    const prefecture = ($('prefecture', 'prefectureFilter')?.value || '').trim();
+
+    state.filtered = state.records.filter((rec) => {
+      if (prefecture && rec.prefecture !== prefecture) return false;
+      if (keyword) {
+        const hay = buildSearchText(rec).toLowerCase();
+        if (!hay.includes(keyword)) return false;
+      }
+      return true;
+    });
+
+    render(state.filtered);
+    setStatus(`読み込み完了：${state.records.length.toLocaleString('ja-JP')}件 / 表示中：${state.filtered.length.toLocaleString('ja-JP')}件`);
+  }
+
+  function populatePrefectures(records) {
+    const select = $('prefecture', 'prefectureFilter');
+    if (!select) return;
+
+    const current = select.value;
+    const prefs = [...new Set(records.map((r) => r.prefecture).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, 'ja'));
+
+    select.innerHTML = '<option value="">すべての都道府県</option>' +
+      prefs.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+
+    select.value = current;
   }
 
   function bindEvents() {
-    const searchInput = document.getElementById('searchInput');
-    const prefSelect = document.getElementById('prefSelect');
-    const buttons = document.querySelectorAll('.filter-btn');
-
-    searchInput.addEventListener('input', e => {
-      currentQuery = e.target.value;
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        if (stateHasCondition()) doSearch();
-        else initDisplay();
-      }, 200);
-    });
-
-    prefSelect.addEventListener('change', e => {
-      currentPref = e.target.value;
-      if (stateHasCondition()) doSearch();
-      else initDisplay();
-    });
-
-    buttons.forEach(btn => {
-      btn.addEventListener('click', () => {
-        buttons.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        currentFilter = btn.dataset.filter;
-
-        if (stateHasCondition()) doSearch();
-        else initDisplay();
-      });
-    });
+    $('keyword', 'searchInput')?.addEventListener('input', applyFilters);
+    $('prefecture', 'prefectureFilter')?.addEventListener('change', applyFilters);
   }
 
   async function loadDB() {
-    const info = document.getElementById('resultInfo');
-    const headerMeta = document.getElementById('headerMeta');
+    setStatus('db.json を読み込み中...');
+    const url = new URL('./data/db.json', window.location.href);
+    const response = await fetch(url.href, { cache: 'no-store' });
 
-    info.textContent = 'データを読み込み中...';
-
-    try {
-      const response = await fetch('./data/db.json?ts=' + Date.now(), {
-        cache: 'no-store'
-      });
-
-      if (!response.ok) {
-        throw new Error(`db.json の読み込みに失敗しました (${response.status})`);
-      }
-
-      const raw = await response.json();
-      window.DB_RAW = raw;
-
-      DB = normalizeDbData(raw);
-      window.DB = DB;
-
-      if (headerMeta) {
-        headerMeta.textContent = `47都道府県 ${DB.length}件のデータを収録`;
-      }
-
-      initDisplay();
-      console.log('DB loaded:', raw);
-      console.log('Normalized entries:', DB);
-    } catch (error) {
-      console.error(error);
-      info.textContent = 'データの読み込みに失敗しました';
-      document.getElementById('results').innerHTML =
-        `<div class="no-results"><span>⚠️</span>${escapeHtml(error.message)}</div>`;
+    if (!response.ok) {
+      throw new Error(`db.json の読み込みに失敗しました (${response.status})`);
     }
+
+    const raw = await response.json();
+    state.rawDB = raw;
+    state.records = normalizeDB(raw);
+    populatePrefectures(state.records);
+    applyFilters();
   }
 
   document.addEventListener('DOMContentLoaded', async () => {
     bindEvents();
-    await loadDB();
+
+    try {
+      await loadDB();
+    } catch (error) {
+      console.error(error);
+      setStatus(error.message || 'データの読み込みに失敗しました', true);
+      const el = $('results', 'result');
+      if (el) el.innerHTML = '<div class="empty">データを表示できませんでした。</div>';
+    }
   });
 })();
