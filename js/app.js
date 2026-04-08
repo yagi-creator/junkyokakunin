@@ -77,7 +77,7 @@
       window.DB = rawDB;
 
       allRecords = normalizeDB(rawDB);
-      filteredRecords = allRecords.slice();
+      filteredRecords = [];
 
       applyFilters();
     } catch (error) {
@@ -265,12 +265,27 @@
   }
 
   function applyFilters() {
+    if (!hasActiveSearchCondition()) {
+      filteredRecords = [];
+      updateResultInfo(true);
+      renderResults(true);
+      return;
+    }
+
     filteredRecords = allRecords.filter(function (record) {
       return matchPrefecture(record) && matchSchoolType(record) && matchKeyword(record);
     });
 
-    updateResultInfo();
-    renderResults();
+    updateResultInfo(false);
+    renderResults(false);
+  }
+
+  function hasActiveSearchCondition() {
+    return Boolean(
+      state.keyword ||
+      state.prefecture ||
+      (state.schoolType && state.schoolType !== 'all')
+    );
   }
 
   function matchPrefecture(record) {
@@ -313,9 +328,19 @@
     ].join(' ').toLowerCase();
   }
 
-  function renderResults() {
+  function renderResults(isInitialState) {
     const resultsEl = document.getElementById('results');
     if (!resultsEl) return;
+
+    if (isInitialState) {
+      resultsEl.innerHTML = `
+        <div class="no-results">
+          <span>🔎</span>
+          市区町村名・学校名で検索、または都道府県・種別を指定すると表示されます
+        </div>
+      `;
+      return;
+    }
 
     if (!filteredRecords.length) {
       resultsEl.innerHTML = `
@@ -540,9 +565,16 @@
     return parts.join(' / ');
   }
 
-  function updateResultInfo() {
+  function updateResultInfo(isInitialState) {
     if (!allRecords.length) {
       setResultInfo('データがありません');
+      return;
+    }
+
+    if (isInitialState) {
+      setResultInfo(
+        '全' + allRecords.length.toLocaleString() + '件のデータを読み込み済み / 0件表示'
+      );
       return;
     }
 
