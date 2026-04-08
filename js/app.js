@@ -77,87 +77,140 @@
   }
 
   function normalizeRecord(item, index) {
-    const displayName = firstNonEmpty(
-      item.地区名,
-      item.regionName,
-      item.areaName,
-      item.locationName,
-      item.municipality,
-      item.city,
-      item.市町村,
-      item.name,
-      item.title
-    ) || "名称未設定";
-
-    const municipality = firstNonEmpty(
-      item.municipality,
-      item.city,
-      item.市町村,
-      item.地区名,
-      item.regionName,
-      item.areaName
+    const prefecture = firstMeaningfulDisplayText(
+      getByPath(item, "prefecture"),
+      getByPath(item, "pref"),
+      getByPath(item, "都道府県")
     ) || "";
 
-    const regionName = firstNonEmpty(
-      item.地区名,
-      item.regionName,
-      item.area,
-      item.areaName,
-      item.location,
+    const displayName = firstMeaningfulDisplayText(
+      getByPath(item, "地区名"),
+      getByPath(item, "地域名"),
+      getByPath(item, "regionName"),
+      getByPath(item, "areaName"),
+      getByPath(item, "locationName"),
+      getByPath(item, "municipality"),
+      getByPath(item, "city"),
+      getByPath(item, "市町村"),
+      getByPath(item, "name"),
+      getByPath(item, "title")
+    ) || "名称未設定";
+
+    const municipality = firstMeaningfulDisplayText(
+      getByPath(item, "municipality"),
+      getByPath(item, "city"),
+      getByPath(item, "市町村"),
+      getByPath(item, "地区名"),
+      getByPath(item, "地域名"),
+      getByPath(item, "regionName"),
+      getByPath(item, "areaName")
+    ) || displayName;
+
+    const regionName = firstMeaningfulDisplayText(
+      getByPath(item, "地区名"),
+      getByPath(item, "地域名"),
+      getByPath(item, "regionName"),
+      getByPath(item, "area"),
+      getByPath(item, "areaName"),
+      getByPath(item, "location"),
       municipality,
       displayName
     ) || "地域名未設定";
 
-    const kindRaw = firstNonEmpty(
-      item.kind,
-      item.schoolType,
-      item.school_type,
-      item.種別,
-      item.校種
+    const kindRaw = firstMeaningfulDisplayText(
+      getByPath(item, "kind"),
+      getByPath(item, "schoolType"),
+      getByPath(item, "school_type"),
+      getByPath(item, "種別"),
+      getByPath(item, "校種")
     ) || "公立";
 
     const kind = normalizeKind(kindRaw);
 
     return {
       id: firstNonEmpty(
-        item.id,
-        item.code,
-        item.dataId,
-        item._sourceKey
+        getByPath(item, "id"),
+        getByPath(item, "code"),
+        getByPath(item, "dataId"),
+        getByPath(item, "_sourceKey")
       ) || `row_${index + 1}`,
 
       name: displayName,
       municipality,
-      prefecture: firstNonEmpty(
-        item.prefecture,
-        item.pref,
-        item.都道府県
-      ) || "",
-
+      prefecture,
       regionName,
       kind,
-      elementary: item.elementary || item.es || item.小学校 || item.小 || {},
-      junior: item.junior || item.js || item.中学校 || item.中 || {}
+      elementary: normalizeSubjects(
+        getByPath(item, "elementary") ||
+        getByPath(item, "es") ||
+        getByPath(item, "小学校") ||
+        getByPath(item, "小")
+      ),
+      junior: normalizeSubjects(
+        getByPath(item, "junior") ||
+        getByPath(item, "js") ||
+        getByPath(item, "中学校") ||
+        getByPath(item, "中")
+      )
     };
   }
 
+  function normalizeSubjects(value) {
+    if (!value || typeof value !== "object") return {};
+    return value;
+  }
+
   function normalizeKind(value) {
-    const text = String(value || "").trim();
-    if (text.includes("私")) return "国私立";
+    const text = normalizeText(value);
+    if (!text) return "公立";
     if (text.includes("国私")) return "国私立";
+    if (text.includes("私")) return "国私立";
     return "公立";
+  }
+
+  function getByPath(obj, key) {
+    if (!obj || typeof obj !== "object") return undefined;
+    return obj[key];
+  }
+
+  function normalizeText(value) {
+    if (value === null || value === undefined) return "";
+    return String(value).trim();
   }
 
   function firstNonEmpty(...values) {
     for (const value of values) {
-      if (value === null || value === undefined) continue;
+      const text = normalizeText(value);
+      if (text) return text;
+    }
+    return "";
+  }
 
-      const text = String(value).trim();
+  function firstMeaningfulDisplayText(...values) {
+    for (const value of values) {
+      const text = normalizeText(value);
       if (!text) continue;
-
+      if (looksLikeMachineId(text)) continue;
       return text;
     }
     return "";
+  }
+
+  function looksLikeMachineId(text) {
+    const value = String(text).trim();
+
+    if (!value) return true;
+
+    // 数字だけ
+    if (/^\d+$/.test(value)) return true;
+
+    // row_12 / data_99 / id-100 みたいな機械的ID
+    if (/^(row|data|id|key|item)[\-_]?\d+$/i.test(value)) return true;
+
+    // 数字が大半で区切り記号だけ
+    if (/^[\d\-_]+$/.test(value)) return true;
+
+    return false;
   }
 
   function populatePrefFilter(records) {
