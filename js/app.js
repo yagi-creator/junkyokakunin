@@ -1,103 +1,133 @@
-(() => {
+(function () {
   'use strict';
 
-  let rawDB = null;
-  let allRecords = [];
-  let filteredRecords = [];
+  var rawDB = null;
+  var allRecords = [];
+  var filteredRecords = [];
 
-  const state = {
+  var state = {
     keyword: '',
     prefecture: '',
     schoolType: 'all'
   };
 
-  const ELEM_ORDER = [
+  var ELEM_ORDER = [
     '国語', '書写', '社会', '地図', '算数', '理科', '生活',
     '音楽', '図工', '家庭', '保健', '英語', '道徳'
   ];
 
-  const JHS_ORDER = [
+  var JHS_ORDER = [
     '国語', '書写', '社会', '地図', '数学', '理科',
     '音楽', '器楽', '美術', '保体', '保健体育',
     '技術', '家庭', '技家', '英語', '道徳'
   ];
 
-  document.addEventListener('DOMContentLoaded', initApp);
+  window.addEventListener('error', function (event) {
+    showFatalError('JavaScriptエラー: ' + (event.message || '不明なエラー'));
+    console.error(event.error || event.message || event);
+  });
 
-  async function initApp() {
-    bindEvents();
-    await loadDB();
-    applyFilters();
+  window.addEventListener('unhandledrejection', function (event) {
+    var message = event && event.reason && event.reason.message
+      ? event.reason.message
+      : String(event.reason || '不明なPromiseエラー');
+    showFatalError('Promiseエラー: ' + message);
+    console.error(event.reason || event);
+  });
+
+  bootStatus('app.js を読み込みました');
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startApp);
+  } else {
+    startApp();
+  }
+
+  function startApp() {
+    try {
+      bootStatus('初期化を開始します');
+      bindEvents();
+      loadDB();
+    } catch (err) {
+      showFatalError('初期化に失敗しました: ' + (err && err.message ? err.message : err));
+      console.error(err);
+    }
   }
 
   function bindEvents() {
-    const searchInput = document.getElementById('searchInput');
-    const prefSelect = document.getElementById('prefSelect');
-    const filterButtons = document.querySelectorAll('.filter-btn');
+    var searchInput = document.getElementById('searchInput');
+    var prefSelect = document.getElementById('prefSelect');
+    var filterButtons = document.querySelectorAll('.filter-btn');
 
     if (searchInput) {
-      searchInput.addEventListener('input', (e) => {
+      searchInput.addEventListener('input', function (e) {
         state.keyword = normalizeText(e.target.value).toLowerCase();
         applyFilters();
       });
     }
 
     if (prefSelect) {
-      prefSelect.addEventListener('change', (e) => {
+      prefSelect.addEventListener('change', function (e) {
         state.prefecture = normalizeText(e.target.value);
         applyFilters();
       });
     }
 
-    filterButtons.forEach((btn) => {
-      btn.addEventListener('click', () => {
-        filterButtons.forEach((b) => b.classList.remove('active'));
-        btn.classList.add('active');
-        state.schoolType = btn.dataset.filter || 'all';
+    for (var i = 0; i < filterButtons.length; i++) {
+      filterButtons[i].addEventListener('click', function () {
+        var buttons = document.querySelectorAll('.filter-btn');
+        for (var j = 0; j < buttons.length; j++) {
+          buttons[j].classList.remove('active');
+        }
+        this.classList.add('active');
+        state.schoolType = this.getAttribute('data-filter') || 'all';
         applyFilters();
       });
-    });
+    }
+
+    bootStatus('イベントを登録しました');
   }
 
-  async function loadDB() {
+  function loadDB() {
     setResultInfo('データを読み込み中...');
-    const resultsEl = document.getElementById('results');
+    bootStatus('db.json を取得しています');
 
-    try {
-      const response = await fetch('./data/db.json', { cache: 'no-store' });
-      if (!response.ok) {
-        throw new Error(`db.json の読み込みに失敗しました（${response.status}）`);
-      }
+    fetch('./data/db.json?v=debug1', { cache: 'no-store' })
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error('db.json の読み込みに失敗しました（' + response.status + '）');
+        }
+        return response.json();
+      })
+      .then(function (data) {
+        rawDB = data;
+        window.DB = rawDB;
 
-      rawDB = await response.json();
-      window.DB = rawDB;
+        bootStatus('db.json の読み込み成功');
 
-      allRecords = normalizeDB(rawDB);
-      filteredRecords = [...allRecords];
+        allRecords = normalizeDB(rawDB);
+        filteredRecords = allRecords.slice();
 
-      setResultInfo(`全${allRecords.length.toLocaleString()}件を読み込みました`);
-    } catch (error) {
-      console.error(error);
-      if (resultsEl) {
-        resultsEl.innerHTML = `
-          <div class="no-results">
-            <span>⚠️</span>
-            データの読み込みに失敗しました<br>
-            <small>${escapeHtml(error.message || '')}</small>
-          </div>
-        `;
-      }
-      setResultInfo('データの読み込みに失敗しました');
-    }
+        bootStatus('正規化完了: ' + allRecords.length + '件');
+
+        applyFilters();
+      })
+      .catch(function (error) {
+        console.error(error);
+        showFatalError('データ読み込みに失敗しました: ' + (error && error.message ? error.message : error));
+      });
   }
 
   function normalizeDB(data) {
     if (Array.isArray(data)) {
-      return data.map((item, index) => normalizeRecord(item, index, ''));
+      return data.map(function (item, index) {
+        return normalizeRecord(item, index, '');
+      });
     }
 
     if (isPlainObject(data)) {
-      return Object.entries(data).map(([sourceKey, item], index) => {
+      return Object.keys(data).map(function (sourceKey, index) {
+        var item = data[sourceKey];
         if (isPlainObject(item)) {
           return normalizeRecord(item, index, sourceKey);
         }
@@ -109,16 +139,16 @@
   }
 
   function normalizeRecord(item, index, sourceKey) {
-    const safeSourceKey = isMeaningfulDisplayText(sourceKey) ? sourceKey : '';
+    var safeSourceKey = isMeaningfulDisplayText(sourceKey) ? sourceKey : '';
 
-    const prefecture = firstNonEmpty(
+    var prefecture = firstNonEmpty(
       item.prefecture,
       item.pref,
       item.都道府県,
       item.県名
     );
 
-    const schoolTypeRaw = firstNonEmpty(
+    var schoolTypeRaw = firstNonEmpty(
       item.schoolType,
       item.school_type,
       item.kind,
@@ -128,9 +158,10 @@
       item.設置区分,
       '公立'
     );
-    const schoolType = normalizeSchoolType(schoolTypeRaw);
 
-    const displayName = firstMeaningfulDisplayText(
+    var schoolType = normalizeSchoolType(schoolTypeRaw);
+
+    var displayName = firstMeaningfulDisplayText(
       item.name,
       item.title,
       item.schoolName,
@@ -147,7 +178,7 @@
       safeSourceKey
     ) || '名称未設定';
 
-    const municipality = firstMeaningfulDisplayText(
+    var municipality = firstMeaningfulDisplayText(
       item.municipality,
       item.city,
       item.市町村,
@@ -161,7 +192,7 @@
       item.title
     ) || displayName;
 
-    const elementary = normalizeSubjects(
+    var elementary = normalizeSubjects(
       item.elementary ||
       item.es ||
       item.elem ||
@@ -171,7 +202,7 @@
       {}
     );
 
-    const junior = normalizeSubjects(
+    var junior = normalizeSubjects(
       item.junior ||
       item.jhs ||
       item.js ||
@@ -189,13 +220,13 @@
         item.no,
         item._id,
         sourceKey
-      ) || `row_${index + 1}`,
-      displayName,
-      municipality,
-      prefecture,
-      schoolType,
-      elementary,
-      junior
+      ) || ('row_' + (index + 1)),
+      displayName: displayName,
+      municipality: municipality,
+      prefecture: prefecture,
+      schoolType: schoolType,
+      elementary: elementary,
+      junior: junior
     };
   }
 
@@ -203,36 +234,36 @@
     if (!value) return {};
 
     if (Array.isArray(value)) {
-      const result = {};
-      value.forEach((row, index) => {
+      var arrayResult = {};
+      value.forEach(function (row, index) {
         if (isPlainObject(row)) {
-          const subjectName = firstNonEmpty(
+          var subjectName = firstNonEmpty(
             row.subject,
             row.name,
             row.label,
             row.教科,
             row.科目,
-            `項目${index + 1}`
+            '項目' + (index + 1)
           );
-          result[subjectName] = normalizeSubjectValue(
-            row.publisher ??
-            row.pub ??
-            row.text ??
-            row.出版社 ??
-            row.value ??
+          arrayResult[subjectName] = normalizeSubjectValue(
+            row.publisher != null ? row.publisher :
+            row.pub != null ? row.pub :
+            row.text != null ? row.text :
+            row.出版社 != null ? row.出版社 :
+            row.value != null ? row.value :
             ''
           );
         }
       });
-      return result;
+      return arrayResult;
     }
 
     if (isPlainObject(value)) {
-      const result = {};
-      Object.entries(value).forEach(([subjectName, subjectValue]) => {
-        result[subjectName] = normalizeSubjectValue(subjectValue);
+      var objectResult = {};
+      Object.keys(value).forEach(function (subjectName) {
+        objectResult[subjectName] = normalizeSubjectValue(value[subjectName]);
       });
-      return result;
+      return objectResult;
     }
 
     return {};
@@ -252,7 +283,7 @@
     }
 
     if (isPlainObject(value)) {
-      const publisher = firstNonEmpty(
+      var publisher = firstNonEmpty(
         value.publisher,
         value.pub,
         value.text,
@@ -263,7 +294,7 @@
         value.value
       );
 
-      const note = firstNonEmpty(
+      var note = firstNonEmpty(
         value.note,
         value.memo,
         value.remark,
@@ -274,7 +305,7 @@
         value.中３
       );
 
-      const hasChu3 = Boolean(
+      var hasChu3 = !!(
         note ||
         value.hasChu3 ||
         value.chu3 ||
@@ -285,7 +316,7 @@
       return {
         publisher: publisher || '',
         note: note || '',
-        hasChu3
+        hasChu3: hasChu3
       };
     }
 
@@ -297,7 +328,7 @@
   }
 
   function splitPublisherAndNote(text) {
-    const trimmed = normalizeText(text);
+    var trimmed = normalizeText(text);
     if (!trimmed) {
       return {
         publisher: '',
@@ -306,7 +337,7 @@
       };
     }
 
-    const noteMatch = trimmed.match(/^(.*?)(※.+)$/);
+    var noteMatch = trimmed.match(/^(.*?)(※.+)$/);
     if (noteMatch) {
       return {
         publisher: normalizeText(noteMatch[1]),
@@ -315,7 +346,7 @@
       };
     }
 
-    const chu3ParenMatch = trimmed.match(/^(.*?)([（(].*(中3|中３|3年|３年).*[)）])$/);
+    var chu3ParenMatch = trimmed.match(/^(.*?)([（(].*(中3|中３|3年|３年).*[)）])$/);
     if (chu3ParenMatch) {
       return {
         publisher: normalizeText(chu3ParenMatch[1]),
@@ -332,16 +363,10 @@
   }
 
   function applyFilters() {
-    filteredRecords = allRecords.filter((item) => {
-      const prefectureMatched =
-        !state.prefecture || item.prefecture === state.prefecture;
-
-      const schoolTypeMatched =
-        state.schoolType === 'all' || item.schoolType === state.schoolType;
-
-      const keywordMatched =
-        !state.keyword || buildSearchText(item).includes(state.keyword);
-
+    filteredRecords = allRecords.filter(function (item) {
+      var prefectureMatched = !state.prefecture || item.prefecture === state.prefecture;
+      var schoolTypeMatched = state.schoolType === 'all' || item.schoolType === state.schoolType;
+      var keywordMatched = !state.keyword || buildSearchText(item).indexOf(state.keyword) !== -1;
       return prefectureMatched && schoolTypeMatched && keywordMatched;
     });
 
@@ -350,19 +375,15 @@
   }
 
   function buildSearchText(item) {
-    const elemText = Object.entries(item.elementary || {})
-      .map(([subject, val]) => {
-        const v = normalizeSubjectValue(val);
-        return `${subject} ${v.publisher} ${v.note}`;
-      })
-      .join(' ');
+    var elemText = Object.keys(item.elementary || {}).map(function (subject) {
+      var v = normalizeSubjectValue(item.elementary[subject]);
+      return subject + ' ' + v.publisher + ' ' + v.note;
+    }).join(' ');
 
-    const jhsText = Object.entries(item.junior || {})
-      .map(([subject, val]) => {
-        const v = normalizeSubjectValue(val);
-        return `${subject} ${v.publisher} ${v.note}`;
-      })
-      .join(' ');
+    var jhsText = Object.keys(item.junior || {}).map(function (subject) {
+      var v = normalizeSubjectValue(item.junior[subject]);
+      return subject + ' ' + v.publisher + ' ' + v.note;
+    }).join(' ');
 
     return [
       item.displayName,
@@ -371,22 +392,19 @@
       item.schoolType,
       elemText,
       jhsText
-    ]
-      .join(' ')
-      .toLowerCase();
+    ].join(' ').toLowerCase();
   }
 
   function renderResults() {
-    const resultsEl = document.getElementById('results');
+    var resultsEl = document.getElementById('results');
     if (!resultsEl) return;
 
     if (!filteredRecords.length) {
-      resultsEl.innerHTML = `
-        <div class="no-results">
-          <span>🔍</span>
-          該当するデータがありません
-        </div>
-      `;
+      resultsEl.innerHTML =
+        '<div class="no-results">' +
+          '<span>🔍</span>' +
+          '該当するデータがありません' +
+        '</div>';
       return;
     }
 
@@ -394,73 +412,80 @@
   }
 
   function renderCard(item) {
-    const typeClass = item.schoolType === '公立' ? 'tag-public' : 'tag-private';
-    const locationText = buildLocationText(item);
+    var typeClass = item.schoolType === '公立' ? 'tag-public' : 'tag-private';
+    var locationText = buildLocationText(item);
 
-    return `
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">${escapeHtml(item.displayName)}</div>
-          <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
-            <span class="tag ${typeClass}">${escapeHtml(item.schoolType)}</span>
-            ${item.prefecture ? `<span class="pref-tag">${escapeHtml(item.prefecture)}</span>` : ''}
-          </div>
-        </div>
-        <div class="card-body">
-          ${renderSchoolSection('小学校', 'elem', item.elementary, false)}
-          ${renderSchoolSection('中学校', 'jhs', item.junior, true)}
-          ${locationText ? `<div class="location-note">${escapeHtml(locationText)}</div>` : ''}
-        </div>
-      </div>
-    `;
+    return (
+      '<div class="card">' +
+        '<div class="card-header">' +
+          '<div class="card-title">' + escapeHtml(item.displayName) + '</div>' +
+          '<div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">' +
+            '<span class="tag ' + typeClass + '">' + escapeHtml(item.schoolType) + '</span>' +
+            (item.prefecture ? '<span class="pref-tag">' + escapeHtml(item.prefecture) + '</span>' : '') +
+          '</div>' +
+        '</div>' +
+        '<div class="card-body">' +
+          renderSchoolSection('小学校', 'elem', item.elementary, false) +
+          renderSchoolSection('中学校', 'jhs', item.junior, true) +
+          (locationText ? '<div class="location-note">' + escapeHtml(locationText) + '</div>' : '') +
+        '</div>' +
+      '</div>'
+    );
   }
 
   function renderSchoolSection(label, className, subjects, isJhs) {
-    const entries = Object.entries(subjects || {});
-    const sortedEntries = sortSubjectEntries(entries, isJhs);
+    var entries = Object.keys(subjects || {}).map(function (key) {
+      return [key, subjects[key]];
+    });
 
-    return `
-      <div class="school-section">
-        <div class="section-label ${className}">${escapeHtml(label)}</div>
-        <div class="subjects ${isJhs ? 'jhs' : ''}">
-          ${
-            sortedEntries.length
-              ? sortedEntries.map(([subject, value]) => renderSubject(subject, value)).join('')
-              : `
-                <div class="subject">
-                  <span class="subject-name">-</span>
-                  <span class="subject-pub">データなし</span>
-                </div>
-              `
-          }
-        </div>
-      </div>
-    `;
+    var sortedEntries = sortSubjectEntries(entries, isJhs);
+
+    var bodyHtml = '';
+    if (sortedEntries.length) {
+      bodyHtml = sortedEntries.map(function (entry) {
+        return renderSubject(entry[0], entry[1]);
+      }).join('');
+    } else {
+      bodyHtml =
+        '<div class="subject">' +
+          '<span class="subject-name">-</span>' +
+          '<span class="subject-pub">データなし</span>' +
+        '</div>';
+    }
+
+    return (
+      '<div class="school-section">' +
+        '<div class="section-label ' + className + '">' + escapeHtml(label) + '</div>' +
+        '<div class="subjects ' + (isJhs ? 'jhs' : '') + '">' +
+          bodyHtml +
+        '</div>' +
+      '</div>'
+    );
   }
 
   function renderSubject(subjectName, value) {
-    const normalized = normalizeSubjectValue(value);
+    var normalized = normalizeSubjectValue(value);
 
-    return `
-      <div class="subject">
-        <span class="subject-name">${escapeHtml(subjectName)}</span>
-        <span class="subject-pub ${normalized.hasChu3 ? 'has-chu3' : ''}">
-          ${escapeHtml(normalized.publisher || '—')}
-        </span>
-        ${normalized.note ? `<span class="chu3-note">${escapeHtml(normalized.note)}</span>` : ''}
-      </div>
-    `;
+    return (
+      '<div class="subject">' +
+        '<span class="subject-name">' + escapeHtml(subjectName) + '</span>' +
+        '<span class="subject-pub ' + (normalized.hasChu3 ? 'has-chu3' : '') + '">' +
+          escapeHtml(normalized.publisher || '—') +
+        '</span>' +
+        (normalized.note ? '<span class="chu3-note">' + escapeHtml(normalized.note) + '</span>' : '') +
+      '</div>'
+    );
   }
 
   function sortSubjectEntries(entries, isJhs) {
-    const order = isJhs ? JHS_ORDER : ELEM_ORDER;
+    var order = isJhs ? JHS_ORDER : ELEM_ORDER;
 
-    return [...entries].sort((a, b) => {
-      const aIndex = order.indexOf(a[0]);
-      const bIndex = order.indexOf(b[0]);
+    return entries.slice().sort(function (a, b) {
+      var aIndex = order.indexOf(a[0]);
+      var bIndex = order.indexOf(b[0]);
 
       if (aIndex === -1 && bIndex === -1) {
-        return a[0].localeCompare(b[0], 'ja');
+        return String(a[0]).localeCompare(String(b[0]), 'ja');
       }
       if (aIndex === -1) return 1;
       if (bIndex === -1) return -1;
@@ -469,15 +494,12 @@
   }
 
   function buildLocationText(item) {
-    const parts = [];
-
+    var parts = [];
     if (item.prefecture) parts.push(item.prefecture);
     if (item.municipality && item.municipality !== item.prefecture) {
       parts.push(item.municipality);
     }
-
-    const joined = parts.join(' / ');
-    return joined || '';
+    return parts.join(' / ');
   }
 
   function updateResultInfo() {
@@ -486,25 +508,44 @@
       return;
     }
 
-    setResultInfo(
-      `全${allRecords.length.toLocaleString()}件中 ${filteredRecords.length.toLocaleString()}件を表示`
-    );
+    setResultInfo('全' + allRecords.length.toLocaleString() + '件中 ' + filteredRecords.length.toLocaleString() + '件を表示');
   }
 
   function setResultInfo(text) {
-    const el = document.getElementById('resultInfo');
+    var el = document.getElementById('resultInfo');
     if (el) el.textContent = text;
   }
 
+  function bootStatus(text) {
+    var el = document.getElementById('resultInfo');
+    if (el) {
+      el.textContent = text;
+    }
+    console.log('[app.js]', text);
+  }
+
+  function showFatalError(message) {
+    setResultInfo(message);
+
+    var resultsEl = document.getElementById('results');
+    if (resultsEl) {
+      resultsEl.innerHTML =
+        '<div class="no-results">' +
+          '<span>⚠️</span>' +
+          escapeHtml(message) +
+        '</div>';
+    }
+  }
+
   function normalizeSchoolType(value) {
-    const text = normalizeText(value);
+    var text = normalizeText(value);
     if (!text) return '公立';
 
     if (
-      text.includes('国私') ||
-      text.includes('私立') ||
-      text.includes('国立') ||
-      text.includes('私学')
+      text.indexOf('国私') !== -1 ||
+      text.indexOf('私立') !== -1 ||
+      text.indexOf('国立') !== -1 ||
+      text.indexOf('私学') !== -1
     ) {
       return '国私立';
     }
@@ -512,17 +553,17 @@
     return '公立';
   }
 
-  function firstNonEmpty(...values) {
-    for (const value of values) {
-      const text = normalizeText(value);
+  function firstNonEmpty() {
+    for (var i = 0; i < arguments.length; i++) {
+      var text = normalizeText(arguments[i]);
       if (text) return text;
     }
     return '';
   }
 
-  function firstMeaningfulDisplayText(...values) {
-    for (const value of values) {
-      const text = normalizeText(value);
+  function firstMeaningfulDisplayText() {
+    for (var i = 0; i < arguments.length; i++) {
+      var text = normalizeText(arguments[i]);
       if (!text) continue;
       if (!isMeaningfulDisplayText(text)) continue;
       return text;
@@ -531,14 +572,14 @@
   }
 
   function isMeaningfulDisplayText(text) {
-    const v = normalizeText(text);
+    var v = normalizeText(text);
     if (!v) return false;
     if (looksLikeMachineId(v)) return false;
     return true;
   }
 
   function looksLikeMachineId(text) {
-    const v = normalizeText(text);
+    var v = normalizeText(text);
 
     if (!v) return true;
     if (/^\d+$/.test(v)) return true;
@@ -559,10 +600,10 @@
 
   function escapeHtml(value) {
     return String(value)
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;');
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 })();
