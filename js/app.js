@@ -62,12 +62,11 @@
     }
 
     if (data && typeof data === "object") {
-      return Object.entries(data).map(([name, item], index) => {
+      return Object.entries(data).map(([sourceKey, item], index) => {
         return normalizeRecord(
           {
-            name,
-            municipality: name,
-            ...item
+            ...item,
+            _sourceKey: sourceKey
           },
           index
         );
@@ -78,31 +77,64 @@
   }
 
   function normalizeRecord(item, index) {
-    const name =
-      item.name ||
-      item.title ||
-      item.municipality ||
-      item.city ||
-      item.市町村 ||
-      item.地区名 ||
-      `データ${index + 1}`;
+    const displayName = firstNonEmpty(
+      item.地区名,
+      item.regionName,
+      item.areaName,
+      item.locationName,
+      item.municipality,
+      item.city,
+      item.市町村,
+      item.name,
+      item.title
+    ) || "名称未設定";
 
-    const kindRaw =
-      item.kind ||
-      item.schoolType ||
-      item.school_type ||
-      item.種別 ||
-      item.校種 ||
-      "公立";
+    const municipality = firstNonEmpty(
+      item.municipality,
+      item.city,
+      item.市町村,
+      item.地区名,
+      item.regionName,
+      item.areaName
+    ) || "";
+
+    const regionName = firstNonEmpty(
+      item.地区名,
+      item.regionName,
+      item.area,
+      item.areaName,
+      item.location,
+      municipality,
+      displayName
+    ) || "地域名未設定";
+
+    const kindRaw = firstNonEmpty(
+      item.kind,
+      item.schoolType,
+      item.school_type,
+      item.種別,
+      item.校種
+    ) || "公立";
 
     const kind = normalizeKind(kindRaw);
 
     return {
-      id: item.id || `row_${index + 1}`,
-      name,
-      municipality: item.municipality || item.city || item.市町村 || name,
-      prefecture: item.prefecture || item.pref || item.都道府県 || "",
-      regionName: item.regionName || item.area || item.地区名 || item.location || item.municipality || name,
+      id: firstNonEmpty(
+        item.id,
+        item.code,
+        item.dataId,
+        item._sourceKey
+      ) || `row_${index + 1}`,
+
+      name: displayName,
+      municipality,
+      prefecture: firstNonEmpty(
+        item.prefecture,
+        item.pref,
+        item.都道府県
+      ) || "",
+
+      regionName,
       kind,
       elementary: item.elementary || item.es || item.小学校 || item.小 || {},
       junior: item.junior || item.js || item.中学校 || item.中 || {}
@@ -114,6 +146,18 @@
     if (text.includes("私")) return "国私立";
     if (text.includes("国私")) return "国私立";
     return "公立";
+  }
+
+  function firstNonEmpty(...values) {
+    for (const value of values) {
+      if (value === null || value === undefined) continue;
+
+      const text = String(value).trim();
+      if (!text) continue;
+
+      return text;
+    }
+    return "";
   }
 
   function populatePrefFilter(records) {
@@ -138,8 +182,8 @@
       const searchTarget = [
         item.name,
         item.municipality,
-        item.prefecture,
         item.regionName,
+        item.prefecture,
         item.kind,
         ...Object.keys(item.elementary || {}),
         ...Object.values(item.elementary || {}),
@@ -188,7 +232,7 @@
       <article class="adoption-card">
         <div class="card-header">
           <div class="card-title-wrap">
-            <h2 class="card-title">${escapeHtml(item.name)}</h2>
+            <h2 class="card-title">${escapeHtml(item.regionName || item.name)}</h2>
           </div>
           <div class="badges">
             <span class="badge badge-kind ${item.kind === "公立" ? "public" : "private"}">${escapeHtml(item.kind)}</span>
