@@ -1,4 +1,5 @@
 (() => {
+  const APP_VERSION = '20260408-2';
   const state = {
     rawDB: [],
     records: [],
@@ -6,7 +7,7 @@
   };
 
   const ELEM_ORDER = ['国語', '社会', '算数', '理科', '英語'];
-  const JHS_ORDER  = ['国語', '地理', '歴史', '公民', '数学', '理科', '英語'];
+  const JHS_ORDER = ['国語', '地理', '歴史', '公民', '数学', '理科', '英語'];
 
   function $(...ids) {
     for (const id of ids) {
@@ -25,25 +26,26 @@
       .replace(/'/g, '&#39;');
   }
 
-  function setStatus(message, isError = false) {
-    const el = $('status', 'resultInfo');
-    if (!el) return;
-    el.textContent = message;
-    el.classList.toggle('error', !!isError);
-  }
-
   function cleanText(value) {
     if (value == null) return '';
     const s = String(value).trim();
-    return s === 'null' || s === 'undefined' ? '' : s;
+    if (!s || s === 'null' || s === 'undefined') return '';
+    return s;
+  }
+
+  function setStatus(message, isError = false) {
+    const el = $('status', 'resultInfo');
+    if (!el) return;
+    el.textContent = `[app.js ${APP_VERSION}] ${message}`;
+    el.classList.toggle('error', !!isError);
   }
 
   function normalizeLocationText(value) {
     let s = cleanText(value);
     if (!s) return '';
     s = s.replace(/[【】]/g, '');
+    s = s.replace(/　/g, ' ');
     s = s.replace(/\s+/g, ' ');
-    s = s.replace(/　+/g, ' ');
     return s.trim();
   }
 
@@ -51,23 +53,29 @@
     const explicit = cleanText(item.municipality || item.市町村名 || item.自治体名);
     if (explicit) return explicit;
 
-    const rawLocation = cleanText(item.location || item.住所始まり || item.採択地区名 || item.採択地区);
-    if (!rawLocation) return '';
+    const rawLocation = cleanText(
+      item.location ||
+      item.住所始まり ||
+      item.採択地区名 ||
+      item.採択地区
+    );
 
-    const normalized = normalizeLocationText(rawLocation);
-    if (!normalized) return '';
-
-    return normalized;
+    return normalizeLocationText(rawLocation);
   }
 
   function normalizeRecord(item, index) {
     if (!item || typeof item !== 'object') return null;
 
-    const location = cleanText(item.location || item.住所始まり || item.採択地区名 || item.採択地区);
     const municipality = deriveMunicipality(item);
+    const location = cleanText(
+      item.location ||
+      item.住所始まり ||
+      item.採択地区名 ||
+      item.採択地区
+    );
 
     return {
-      id: item.id || `row_${index + 1}`,
+      id: cleanText(item.id) || `row_${index + 1}`,
       prefectureCode: item.prefectureCode ?? item.都道府県コード ?? null,
       prefecture: cleanText(item.prefecture || item.都道府県),
       adoptionAreaCode: item.adoptionAreaCode ?? item.採択地区コード ?? item.採択地区 ?? null,
@@ -87,15 +95,13 @@
     }
 
     if (raw && typeof raw === 'object') {
-      return Object.entries(raw)
-        .map(([key, value], index) => {
-          const rec = normalizeRecord(value, index);
-          if (!rec) return null;
-          if (!rec.municipality) rec.municipality = cleanText(key);
-          if (!rec.location) rec.location = cleanText(key);
-          return rec;
-        })
-        .filter(Boolean);
+      return Object.entries(raw).map(([key, value], index) => {
+        const rec = normalizeRecord(value, index);
+        if (!rec) return null;
+        if (!rec.municipality) rec.municipality = cleanText(key);
+        if (!rec.location) rec.location = cleanText(key);
+        return rec;
+      }).filter(Boolean);
     }
 
     throw new Error('db.json は配列またはオブジェクトである必要があります');
@@ -104,7 +110,7 @@
   function getDisplayTitle(rec) {
     if (rec.schoolName) return rec.schoolName;
     if (rec.municipality) return rec.municipality;
-    if (rec.location) return rec.location;
+    if (rec.location) return normalizeLocationText(rec.location);
     return '名称未設定';
   }
 
@@ -123,10 +129,19 @@
       const value = subjects?.[key];
       if (!value) continue;
 
-      if (isJunior && key === '英語' && subjects['英語_中3'] && subjects['英語_中3'] !== value) {
-        lines.push(`<li><span class="label">${escapeHtml(key)}</span><span class="value">${escapeHtml(value)} <span class="note">（中3: ${escapeHtml(subjects['英語_中3'])}）</span></span></li>`);
+      if (
+        isJunior &&
+        key === '英語' &&
+        subjects['英語_中3'] &&
+        subjects['英語_中3'] !== value
+      ) {
+        lines.push(
+          `<li><span class="label">${escapeHtml(key)}</span><span class="value">${escapeHtml(value)} <span class="note">（中3: ${escapeHtml(subjects['英語_中3'])}）</span></span></li>`
+        );
       } else {
-        lines.push(`<li><span class="label">${escapeHtml(key)}</span><span class="value">${escapeHtml(value)}</span></li>`);
+        lines.push(
+          `<li><span class="label">${escapeHtml(key)}</span><span class="value">${escapeHtml(value)}</span></li>`
+        );
       }
     }
 
@@ -138,9 +153,7 @@
   function cardMeta(rec) {
     const chips = [];
     if (rec.prefecture) chips.push(`<span class="chip">${escapeHtml(rec.prefecture)}</span>`);
-    if (rec.schoolName && getMunicipalityLabel(rec)) {
-      chips.push(`<span class="chip">${escapeHtml(getMunicipalityLabel(rec))}</span>`);
-    }
+    if (rec.schoolName) chips.push(`<span class="chip">${escapeHtml(getMunicipalityLabel(rec))}</span>`);
     if (rec.schoolType) chips.push(`<span class="chip">${escapeHtml(rec.schoolType)}</span>`);
     if (rec.schoolName) chips.push('<span class="chip">学校別</span>');
     return chips.join('');
@@ -160,7 +173,6 @@
       const title = getDisplayTitle(rec);
       const municipalityLabel = getMunicipalityLabel(rec);
       const locationLabel = getLocationLabel(rec);
-      const showSchoolLocation = !!rec.schoolName && !!locationLabel;
 
       return `
         <article class="card">
@@ -168,7 +180,7 @@
             <h2 class="card-title">${escapeHtml(title)}</h2>
             <div class="meta">${cardMeta(rec)}</div>
           </div>
-          ${showSchoolLocation ? `<div class="submeta">所在地: ${escapeHtml(locationLabel)}</div>` : ''}
+          ${rec.schoolName && locationLabel ? `<div class="submeta">所在地: ${escapeHtml(locationLabel)}</div>` : ''}
           ${!rec.schoolName && municipalityLabel ? `<div class="submeta">地区名: ${escapeHtml(municipalityLabel)}</div>` : ''}
           <div class="columns">
             <section class="subject-box">
@@ -188,12 +200,14 @@
   }
 
   function updateCount(count) {
-    const el = $('count');
-    if (el) el.textContent = `${count.toLocaleString('ja-JP')}件表示`;
+    const countEl = $('count');
+    if (countEl) {
+      countEl.textContent = `${count.toLocaleString('ja-JP')}件表示`;
+    }
 
-    const meta = $('headerMeta');
-    if (meta) {
-      meta.textContent = `全国 ${state.records.length.toLocaleString('ja-JP')}件のデータを収録 / 現在 ${count.toLocaleString('ja-JP')}件表示`;
+    const metaEl = $('headerMeta');
+    if (metaEl) {
+      metaEl.textContent = `全国 ${state.records.length.toLocaleString('ja-JP')}件のデータを収録 / 現在 ${count.toLocaleString('ja-JP')}件表示`;
     }
   }
 
@@ -210,8 +224,8 @@
   }
 
   function applyFilters() {
-    const keyword = ($('keyword', 'searchInput')?.value || '').trim().toLowerCase();
-    const prefecture = ($('prefecture', 'prefectureFilter')?.value || '').trim();
+    const keyword = cleanText($('keyword', 'searchInput')?.value).toLowerCase();
+    const prefecture = cleanText($('prefecture', 'prefectureFilter')?.value);
 
     state.filtered = state.records.filter((rec) => {
       if (prefecture && rec.prefecture !== prefecture) return false;
@@ -231,10 +245,11 @@
     if (!select) return;
 
     const current = select.value;
-    const prefs = [...new Set(records.map((r) => r.prefecture).filter(Boolean))]
+    const prefs = [...new Set(records.map(r => r.prefecture).filter(Boolean))]
       .sort((a, b) => a.localeCompare(b, 'ja'));
 
-    select.innerHTML = '<option value="">すべての都道府県</option>' +
+    select.innerHTML =
+      '<option value="">すべての都道府県</option>' +
       prefs.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
 
     select.value = current;
@@ -247,7 +262,7 @@
 
   async function loadDB() {
     setStatus('db.json を読み込み中...');
-    const url = new URL('./data/db.json', window.location.href);
+    const url = new URL('./data/db.json?v=20260408-2', window.location.href);
     const response = await fetch(url.href, { cache: 'no-store' });
 
     if (!response.ok) {
@@ -263,14 +278,15 @@
 
   document.addEventListener('DOMContentLoaded', async () => {
     bindEvents();
-
     try {
       await loadDB();
     } catch (error) {
       console.error(error);
       setStatus(error.message || 'データの読み込みに失敗しました', true);
       const el = $('results', 'result');
-      if (el) el.innerHTML = '<div class="empty">データを表示できませんでした。</div>';
+      if (el) {
+        el.innerHTML = '<div class="empty">データを表示できませんでした。</div>';
+      }
     }
   });
 })();
