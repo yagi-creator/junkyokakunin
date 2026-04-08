@@ -17,9 +17,9 @@
   ];
 
   var JHS_ORDER = [
-    '国語', '書写', '社会', '地図', '数学', '理科',
-    '音楽', '器楽', '美術', '保体', '保健体育',
-    '技術', '家庭', '技家', '英語', '道徳'
+    '国語', '書写', '社会', '地理', '歴史', '公民', '地図',
+    '数学', '理科', '音楽', '器楽', '美術',
+    '保体', '保健体育', '技術', '家庭', '技家', '英語', '道徳'
   ];
 
   window.addEventListener('error', function (event) {
@@ -35,8 +35,6 @@
     console.error(event.reason || event);
   });
 
-  bootStatus('app.js を読み込みました');
-
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', startApp);
   } else {
@@ -45,7 +43,6 @@
 
   function startApp() {
     try {
-      bootStatus('初期化を開始します');
       bindEvents();
       loadDB();
     } catch (err) {
@@ -84,15 +81,12 @@
         applyFilters();
       });
     }
-
-    bootStatus('イベントを登録しました');
   }
 
   function loadDB() {
     setResultInfo('データを読み込み中...');
-    bootStatus('db.json を取得しています');
 
-    fetch('./data/db.json?v=debug1', { cache: 'no-store' })
+    fetch('./data/db.json', { cache: 'no-store' })
       .then(function (response) {
         if (!response.ok) {
           throw new Error('db.json の読み込みに失敗しました（' + response.status + '）');
@@ -103,12 +97,8 @@
         rawDB = data;
         window.DB = rawDB;
 
-        bootStatus('db.json の読み込み成功');
-
         allRecords = normalizeDB(rawDB);
         filteredRecords = allRecords.slice();
-
-        bootStatus('正規化完了: ' + allRecords.length + '件');
 
         applyFilters();
       })
@@ -162,14 +152,14 @@
     var schoolType = normalizeSchoolType(schoolTypeRaw);
 
     var displayName = firstMeaningfulDisplayText(
+      item.schoolName,
+      item.学校名,
       item.name,
       item.title,
-      item.schoolName,
-      item.school,
-      item.学校名,
       item.municipality,
       item.city,
       item.市町村,
+      item.location,
       item.regionName,
       item.areaName,
       item.locationName,
@@ -179,6 +169,7 @@
     ) || '名称未設定';
 
     var municipality = firstMeaningfulDisplayText(
+      item.location,
       item.municipality,
       item.city,
       item.市町村,
@@ -514,14 +505,6 @@
   function setResultInfo(text) {
     var el = document.getElementById('resultInfo');
     if (el) el.textContent = text;
-  }
-
-  function bootStatus(text) {
-    var el = document.getElementById('resultInfo');
-    if (el) {
-      el.textContent = text;
-    }
-    console.log('[app.js]', text);
   }
 
   function showFatalError(message) {
